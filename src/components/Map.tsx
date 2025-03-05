@@ -299,45 +299,52 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
     routesSource.clear();
     
     if (routeData.waypoints && routeData.waypoints.length > 1) {
-      const startPoint = routeData.waypoints[0];
-      const endPoint = routeData.waypoints[routeData.waypoints.length - 1];
-      
+      // Create the main route line with all waypoints
       const mainRouteFeature = new Feature({
-        geometry: new geom.LineString([startPoint, endPoint]),
+        geometry: new geom.LineString(routeData.waypoints),
       });
       
       mainRouteFeature.setStyle(new style.Style({
         stroke: new style.Stroke({
           color: 'rgba(0, 123, 255, 0.8)',
-          width: 2,
+          width: 3,
+          lineDash: undefined,
+          lineCap: 'round',
+          lineJoin: 'round'
         }),
       }));
       
       routesSource.addFeature(mainRouteFeature);
       
-      for (let i = 0; i < routeData.waypoints.length; i++) {
-        if (i > 0 && i < routeData.waypoints.length - 1) {
+      // Add intermediate waypoints
+      routeData.waypoints.forEach((waypoint, index) => {
+        if (index > 0 && index < routeData.waypoints.length - 1) {
           const waypointFeature = new Feature({
-            geometry: new geom.Point(routeData.waypoints[i]),
+            geometry: new geom.Point(waypoint),
+            properties: {
+              index,
+              type: 'waypoint'
+            }
           });
           
           waypointFeature.setStyle(new style.Style({
             image: new style.Circle({
-              radius: 4,
+              radius: 3,
               fill: new style.Fill({
-                color: 'rgba(0, 123, 255, 0.7)',
+                color: 'rgba(0, 123, 255, 0.6)',
               }),
               stroke: new style.Stroke({
                 color: 'rgba(255, 255, 255, 0.8)',
-                width: 2,
+                width: 1,
               }),
             }),
           }));
           
           routesSource.addFeature(waypointFeature);
         }
-      }
+      });
       
+      // Add checkpoints with labels
       if (routeData.journeyDetails && routeData.journeyDetails.checkpoints) {
         routeData.journeyDetails.checkpoints.forEach((checkpoint, index) => {
           if (index > 0 && index < routeData.journeyDetails.checkpoints.length - 1) {
@@ -346,7 +353,8 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
               properties: {
                 index,
                 time: checkpoint.estimatedTime,
-                distance: checkpoint.distance
+                distance: checkpoint.distance,
+                type: 'checkpoint'
               }
             });
             
@@ -361,6 +369,20 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
                   width: 2,
                 }),
               }),
+              text: new style.Text({
+                text: `${checkpoint.estimatedTime}\n${checkpoint.distance}km`,
+                offsetY: -15,
+                textAlign: 'center',
+                textBaseline: 'bottom',
+                font: '12px sans-serif',
+                fill: new style.Fill({
+                  color: 'rgba(0, 123, 255, 1)',
+                }),
+                stroke: new style.Stroke({
+                  color: 'rgba(255, 255, 255, 0.8)',
+                  width: 3,
+                }),
+              }),
             }));
             
             routesSource.addFeature(checkpointFeature);
@@ -368,10 +390,12 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
         });
       }
       
+      // Fit the view to show the entire route
       const extent = routesSource.getExtent();
       olMapRef.current.getView().fit(extent, {
         padding: [50, 50, 50, 50],
         duration: 1000,
+        maxZoom: 12 // Limit maximum zoom level
       });
     }
   }, [routeData, mapLoaded]);
@@ -439,3 +463,4 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
 };
 
 export default Map;
+
