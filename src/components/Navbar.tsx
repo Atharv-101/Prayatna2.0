@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Ship, Menu, X, Globe, Map, Navigation, Anchor, CloudSun } from 'lucide-react';
@@ -26,7 +25,7 @@ const Navbar = ({ onSearchPorts, onRouteClick, onPortsClick, onWeatherClick }: N
         <div className="flex items-center gap-2">
           <Ship className="text-ocean-600 dark:text-ocean-300 animate-pulse-soft" size={24} />
           <span className="text-lg font-medium tracking-tight text-ocean-800 dark:text-white">
-            ShipRoute Navigator
+            MarineNav
           </span>
         </div>
 
