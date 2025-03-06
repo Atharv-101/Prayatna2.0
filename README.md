@@ -11,16 +11,16 @@ MarineNav is an advanced real-time navigation and route optimization system desi
 ✅ Traffic & Collision Avoidance: Provides real-time updates on nearby vessels to prevent accidents.<br>
 ✅ Port & Docking Assistance: Guides ships toward the best docking locgitations with estimated arrival times.<br>
 
-**Technology Stack:**
-🚀 AI & Machine Learning: For predictive analytics and optimization
-🌊 Satellite & IoT Sensors: For real-time environmental and location data
-📡 GPS & AIS Integration: For accurate ship tracking and positioning
-☁️ Cloud-Based Platform: Ensures accessibility and seamless updates
+**Technology Stack:** <br>
+🚀 AI & Machine Learning: For predictive analytics and optimization <br>
+🌊 Satellite & IoT Sensors: For real-time environmental and location data <br>
+📡 GPS & AIS Integration: For accurate ship tracking and positioning<br>
+☁️ Cloud-Based Platform: Ensures accessibility and seamless updates<br>
 
-**Impact:**
-🔹 Reduces Fuel Costs by optimizing ship routes
-🔹 Enhances Maritime Safety by preventing accidents and avoiding extreme weather
-🔹 Improves Global Trade Efficiency by reducing shipping delays
-🔹 Lowers Carbon Emissions by minimizing unnecessary fuel consumption
+**Impact:** <br>
+🔹 Reduces Fuel Costs by optimizing ship routes <br>
+🔹 Enhances Maritime Safety by preventing accidents and avoiding extreme weather <br>
+🔹 Improves Global Trade Efficiency by reducing shipping delays <br>
+🔹 Lowers Carbon Emissions by minimizing unnecessary fuel consumption <br>
 
 ## This project revolutionizes maritime navigation, making ocean travel smarter, safer, and more sustainable! 🚢🌍
