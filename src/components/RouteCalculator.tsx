@@ -1,5 +1,6 @@
+
 import { useState, useEffect } from 'react';
-import { Ship, Navigation, Calendar, Anchor, Timer, Droplet, Shield } from 'lucide-react';
+import { Ship, Navigation, Calendar, Anchor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -8,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { majorPorts, Port } from '@/data/ports';
-import { calculateRoutes, RouteResult } from '@/utils/routeUtils';
+import { calculateOptimalRoute, RouteResult } from '@/utils/routeUtils';
 import { cn } from '@/lib/utils';
 import JourneyDetails from './JourneyDetails';
 import RouteTimeline from './RouteTimeline';
@@ -16,7 +17,7 @@ import RouteTimeline from './RouteTimeline';
 interface RouteCalculatorProps {
   startPort: Port | null;
   endPort: Port | null;
-  onCalculate: (data: any) => void;
+  onCalculate: (routeData: any) => void;
   className?: string;
 }
 
@@ -32,8 +33,6 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
   );
   const [isMobileView, setIsMobileView] = useState(false);
   const [activeTab, setActiveTab] = useState("route");
-  const [selectedRouteType, setSelectedRouteType] = useState<'fastest' | 'economic' | 'safe'>('fastest');
-  const [routes, setRoutes] = useState<RouteResult[]>([]);
 
   // Check for mobile view
   useEffect(() => {
@@ -55,44 +54,33 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
     setIsCalculating(true);
     
     try {
-      // Calculate multiple routes
-      const routeOptions = await calculateRoutes(startPort, endPort);
-      setRoutes(routeOptions);
+      const route = await calculateOptimalRoute(
+        startPort.coordinates,
+        endPort.coordinates,
+        {
+          shipSpeed: parseFloat(shipSpeed),
+          departureDate: new Date(departureDate),
+          considerWeather,
+          fuelEfficient,
+          shipType
+        }
+      );
       
-      // Select the first route by default
-      const selectedRoute = routeOptions.find(r => r.type === selectedRouteType) || routeOptions[0];
-      setCalculatedRoute(selectedRoute);
+      setCalculatedRoute(route);
       setActiveTab("timeline");
       
       onCalculate({
-        route: selectedRoute,
+        route,
         startPort,
         endPort,
-        shipType: 'cargo',
-        shipSpeed: 20
+        shipType,
+        shipSpeed: parseFloat(shipSpeed)
       });
     } catch (error) {
-      console.error('Error calculating routes:', error);
+      console.error('Route calculation error:', error);
     } finally {
       setIsCalculating(false);
     }
-  };
-
-  const getRouteIcon = (type: 'fastest' | 'economic' | 'safe') => {
-    switch (type) {
-      case 'fastest':
-        return <Timer className="w-4 h-4" />;
-      case 'economic':
-        return <Droplet className="w-4 h-4" />;
-      case 'safe':
-        return <Shield className="w-4 h-4" />;
-    }
-  };
-
-  const formatDuration = (hours: number) => {
-    const days = Math.floor(hours / 24);
-    const remainingHours = Math.round(hours % 24);
-    return days > 0 ? `${days}d ${remainingHours}h` : `${remainingHours}h`;
   };
 
   return (
@@ -104,8 +92,8 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
       )}>
         <CardHeader className="pb-2">
           <div className="flex items-center gap-2">
-            <Navigation className="text-ocean-600 dark:text-ocean-400" size={20} />
-            <CardTitle className="text-xl">Route Calculator</CardTitle>
+            <Navigation className="text-blue-600 dark:text-blue-400" size={20} />
+            <CardTitle className="text-xl">Sea Route Calculator</CardTitle>
           </div>
         </CardHeader>
         
@@ -123,7 +111,7 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
                     <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">PORT OF ORIGIN</label>
                     {startPort ? (
                       <div className="flex items-center gap-2 mt-1">
-                        <Navigation className="text-ocean-500" size={16} />
+                        <Anchor className="text-blue-500" size={16} />
                         <div>
                           <span className="font-semibold text-sm">{startPort.name}</span>
                           <span className="text-xs text-muted-foreground ml-1">{startPort.country}</span>
@@ -138,7 +126,7 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
                     <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">PORT OF DESTINATION</label>
                     {endPort ? (
                       <div className="flex items-center gap-2 mt-1">
-                        <Anchor className="text-ocean-500" size={16} />
+                        <Anchor className="text-blue-500" size={16} />
                         <div>
                           <span className="font-semibold text-sm">{endPort.name}</span>
                           <span className="text-xs text-muted-foreground ml-1">{endPort.country}</span>
@@ -153,7 +141,7 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
                 <div className="rounded-md border p-3">
                   <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1 block">TRANSPORTATION BY</label>
                   <div className="flex gap-2 mt-1">
-                    <Button size="sm" variant="default" className="bg-ocean-500 hover:bg-ocean-600">SEA</Button>
+                    <Button size="sm" variant="default" className="bg-blue-500 hover:bg-blue-600">SEA</Button>
                   </div>
                 </div>
                 
@@ -239,9 +227,9 @@ const RouteCalculator = ({ startPort, endPort, onCalculate, className }: RouteCa
           <Button 
             onClick={handleCalculation}
             disabled={!startPort || !endPort || isCalculating}
-            className="w-full bg-ocean-600 hover:bg-ocean-700 text-white"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
           >
-            {isCalculating ? 'Calculating Routes...' : 'Calculate Routes'}
+            {isCalculating ? 'Calculating...' : 'Calculate Route'}
           </Button>
         </CardFooter>
       </Card>

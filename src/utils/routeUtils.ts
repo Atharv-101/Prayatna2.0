@@ -36,13 +36,23 @@ export interface RouteOptions {
 
 // Route result interface
 export interface RouteResult {
-  waypoints: [number, number][];
-  distance: number;
-  duration: string;
-  fuelConsumption: number;
-  weatherRisk: 'low' | 'medium' | 'high';
-  type: 'fastest' | 'economic' | 'safe';
-  description: string;
+  waypoints: [number, number][]; 
+  distance: number; // in km
+  duration: string; // formatted time
+  fuelConsumption: number; // in tons
+  weatherRisk: {
+    level: 'low' | 'medium' | 'high';
+    description: string;
+    recommendations: string[];
+  };
+  routeType?: string; // Optional field for route alternatives
+  // Additional journey details
+  journeyDetails: {
+    estimatedArrival: string; // formatted date/time
+    fuelCostEstimate: number; // in USD
+    checkpoints: CheckpointInfo[];
+    totalDurationHours: number; // Total duration in hours (for calculations)
+  };
 }
 
 // Add WeatherData interface
@@ -95,15 +105,6 @@ interface CheckpointInfo {
     warnings: string[];
     recommendations: string[];
   };
-}
-
-// Add Port interface at the top with other interfaces
-interface Port {
-  id: string;
-  name: string;
-  country: string;
-  coordinates: [number, number];
-  size?: 'small' | 'medium' | 'large';
 }
 
 // Update the landMasses array with more precise coastal points
@@ -467,9 +468,9 @@ function findSafeWaterPoint(lon: number, lat: number): [number, number] {
 
 // Create a simple water route between two points
 function createWaterRoute(
-  startLon: number,
-  startLat: number,
-  endLon: number,
+  startLon: number, 
+  startLat: number, 
+  endLon: number, 
   endLat: number
 ): [number, number][] {
   const route: [number, number][] = [];
@@ -513,7 +514,7 @@ function createWaterRoute(
         if (isInWater(safePoint[0], safePoint[1])) {
           finalRoute.push(safePoint);
         }
-      } else {
+    } else {
         finalRoute.push(point);
       }
     }
@@ -743,9 +744,13 @@ export const calculateOptimalRoute = async (
     distance: Math.round(totalDistance),
     duration,
     fuelConsumption,
-    weatherRisk: maxRisk.level,
-    type: 'safe',
-    description: 'Safest route avoiding rough weather and hazards'
+    weatherRisk: maxRisk,
+    journeyDetails: {
+      estimatedArrival: checkpoints[checkpoints.length - 1].estimatedTime,
+      fuelCostEstimate: Math.round(fuelConsumption * 500),
+      checkpoints,
+      totalDurationHours: durationHours
+    }
   };
 };
 
@@ -843,22 +848,22 @@ export const calculateRouteAlternatives = async (
   };
   
   try {
-    const [standardRoute, weatherRoute, fuelRoute] = await Promise.all([
-      calculateOptimalRoute(startCoords, endCoords, standardOptions),
-      calculateOptimalRoute(startCoords, endCoords, weatherOptions),
-      calculateOptimalRoute(startCoords, endCoords, fuelOptions)
-    ]);
-    
-    return [
-      { ...standardRoute, type: 'safe', description: 'Safest route avoiding rough weather and hazards' },
-      { ...weatherRoute, type: 'safe', description: 'Safest route avoiding rough weather and hazards' },
-      { ...fuelRoute, type: 'safe', description: 'Safest route avoiding rough weather and hazards' }
-    ];
+  const [standardRoute, weatherRoute, fuelRoute] = await Promise.all([
+    calculateOptimalRoute(startCoords, endCoords, standardOptions),
+    calculateOptimalRoute(startCoords, endCoords, weatherOptions),
+    calculateOptimalRoute(startCoords, endCoords, fuelOptions)
+  ]);
+  
+  return [
+    { ...standardRoute, routeType: 'Standard' },
+    { ...weatherRoute, routeType: 'Weather Optimized' },
+    { ...fuelRoute, routeType: 'Fuel Efficient' }
+  ];
   } catch (error) {
     console.error('Error calculating routes:', error);
     // Return at least one basic route on error
     const basicRoute = await calculateOptimalRoute(startCoords, endCoords, standardOptions);
-    return [{ ...basicRoute, type: 'safe', description: 'Safest route avoiding rough weather and hazards' }];
+    return [{ ...basicRoute, routeType: 'Standard' }];
   }
 };
 
@@ -910,94 +915,4 @@ function findNearestPort(lon: number, lat: number): NearestPort {
   }
 
   return nearest;
-}
-
-export async function calculateRoutes(startPort: Port, endPort: Port): Promise<RouteResult[]> {
-  const baseOptions: RouteOptions = {
-    startPortId: startPort.id,
-    endPortId: endPort.id,
-    shipType: 'container',
-    shipSpeed: 20,
-    departureDate: new Date(),
-    considerWeather: true,
-    fuelEfficient: false
-  };
-
-  // Generate three different routes
-  const fastestRoute = await calculateOptimalRoute(
-    startPort.coordinates,
-    endPort.coordinates,
-    { ...baseOptions, shipSpeed: 25, considerWeather: false }
-  );
-
-  const economicRoute = await calculateOptimalRoute(
-    startPort.coordinates,
-    endPort.coordinates,
-    { ...baseOptions, shipSpeed: 18, fuelEfficient: true }
-  );
-
-  const safeRoute = await calculateOptimalRoute(
-    startPort.coordinates,
-    endPort.coordinates,
-    { ...baseOptions, shipSpeed: 20, considerWeather: true }
-  );
-
-  return [
-    { ...fastestRoute, type: 'fastest', description: 'Fastest route with minimal deviations' },
-    { ...economicRoute, type: 'economic', description: 'Fuel-efficient route following favorable currents' },
-    { ...safeRoute, type: 'safe', description: 'Safest route avoiding rough weather and hazards' }
-  ];
-}
-
-function generateWaypoints(
-  start: [number, number],
-  end: [number, number],
-  numPoints: number,
-  offsetRatio: number
-): [number, number][] {
-  const waypoints: [number, number][] = [];
-  const [startLon, startLat] = start;
-  const [endLon, endLat] = end;
-
-  // Add start point
-  waypoints.push(start);
-
-  // Generate intermediate points
-  for (let i = 1; i < numPoints - 1; i++) {
-    const ratio = i / (numPoints - 1);
-    const baseLon = startLon + (endLon - startLon) * ratio;
-    const baseLat = startLat + (endLat - startLat) * ratio;
-
-    // Add slight variation to avoid straight lines
-    const offset = (Math.random() - 0.5) * 2 * offsetRatio;
-    const point: [number, number] = [
-      baseLon + offset,
-      baseLat + offset
-    ];
-
-    // Ensure point is in water
-    const safePoint = findSafeWaterPoint(point[0], point[1]);
-    waypoints.push(safePoint);
-  }
-
-  // Add end point
-  waypoints.push(end);
-
-  return waypoints;
-}
-
-function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Radius of the earth in km
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function deg2rad(deg: number): number {
-  return deg * (Math.PI / 180);
 }

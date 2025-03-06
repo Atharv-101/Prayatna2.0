@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Ship, Menu, X, Globe, Map, Navigation, Anchor, CloudSun } from 'lucide-react';
+import { Ship, Menu, X, Globe, Map, Navigation, Anchor, CloudSun, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import SearchBar from './SearchBar';
 
@@ -9,9 +9,10 @@ interface NavbarProps {
   onRouteClick: () => void;
   onPortsClick: () => void;
   onWeatherClick: () => void;
+  onHistoryClick: () => void;
 }
 
-const Navbar = ({ onSearchPorts, onRouteClick, onPortsClick, onWeatherClick }: NavbarProps) => {
+const Navbar = ({ onSearchPorts, onRouteClick, onPortsClick, onWeatherClick, onHistoryClick }: NavbarProps) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const toggleMenu = () => {
@@ -62,6 +63,15 @@ const Navbar = ({ onSearchPorts, onRouteClick, onPortsClick, onWeatherClick }: N
           >
             <CloudSun size={18} />
             <span>Weather</span>
+          </Button>
+
+          <Button 
+            variant="ghost" 
+            className="flex items-center gap-1 text-ocean-600 hover:text-ocean-800 hover:bg-ocean-50 dark:text-ocean-300 dark:hover:text-white dark:hover:bg-ocean-700"
+            onClick={onHistoryClick}
+          >
+            <History size={18} />
+            <span>History</span>
           </Button>
         </div>
 
@@ -118,6 +128,18 @@ const Navbar = ({ onSearchPorts, onRouteClick, onPortsClick, onWeatherClick }: N
             >
               <CloudSun size={18} />
               <span>Weather</span>
+            </Button>
+
+            <Button 
+              variant="ghost" 
+              className="flex items-center justify-start gap-2 text-ocean-600 hover:text-ocean-800 hover:bg-ocean-50 dark:text-ocean-300 dark:hover:text-white dark:hover:bg-ocean-700"
+              onClick={() => {
+                onHistoryClick();
+                setIsMenuOpen(false);
+              }}
+            >
+              <History size={18} />
+              <span>History</span>
             </Button>
           </div>
         </div>
