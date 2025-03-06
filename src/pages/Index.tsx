@@ -5,9 +5,11 @@ import Map from '@/components/Map';
 import PortInfo from '@/components/PortInfo';
 import RouteCalculator from '@/components/RouteCalculator';
 import WeatherOverlay from '@/components/WeatherOverlay';
+import TravelHistory from '@/components/TravelHistory';
 import { Port, searchPorts, majorPorts } from '@/data/ports';
 import { RouteResult } from '@/utils/routeUtils';
 import { cn } from '@/lib/utils';
+import { ChevronUp } from 'lucide-react';
 
 const Index = () => {
   const { toast } = useToast();
@@ -148,87 +150,65 @@ const Index = () => {
       />
       
       {/* Main Content */}
-      <div className="flex-1 pt-16 relative overflow-hidden">
+      <div className="flex-1 relative">
         {/* Map Component */}
-        <Map 
+        <Map
           onPortClick={handlePortClick}
           selectedPorts={{ start: startPort, end: endPort }}
           routeData={routeData?.route || null}
-          className="h-full w-full absolute inset-0"
+          className="h-full w-full"
         />
         
-        {/* Mobile Toggle Button */}
-        {isMobileView && activePanel && (
-          <button
-            onClick={togglePanelMinimize}
-            className="absolute top-4 right-4 z-30 bg-white/90 dark:bg-black/80 backdrop-blur-sm p-2 rounded-full shadow-md"
-          >
-            {isPanelMinimized ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="18 15 12 9 6 15"></polyline>
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            )}
-          </button>
-        )}
-        
-        {/* Side Panels Container */}
+        {/* Side Panel */}
         <div className={cn(
-          "absolute z-20 transition-all duration-300 transform",
-          isMobileView 
-            ? isPanelMinimized
-              ? "bottom-0 left-0 right-0 translate-y-[calc(100%-60px)]"
-              : "bottom-0 left-0 right-0 max-h-[70vh] overflow-auto px-4 pb-4" 
-            : "top-4 left-4 max-h-[calc(100vh-5rem)] overflow-auto"
+          "absolute top-4 right-4 flex flex-col gap-4 transition-all duration-300 max-h-[90vh] overflow-y-auto",
+          isMobileView && isPanelMinimized ? "translate-y-[-90%]" : ""
         )}>
-          {/* Mobile Panel Handle */}
-          {isMobileView && activePanel && (
-            <div 
-              className="h-8 bg-white/90 dark:bg-black/80 rounded-t-lg flex items-center justify-center cursor-pointer"
-              onClick={togglePanelMinimize}
-            >
-              <div className="w-16 h-1 bg-gray-300 dark:bg-gray-600 rounded-full"></div>
-            </div>
-          )}
-          
-          {/* Panel Content */}
-          <div className={cn(
-            "space-y-4",
-            isMobileView && "px-2"
-          )}>
-            {/* Port Info Panel */}
-            {selectedPort && activePanel === 'ports' && (
-              <PortInfo 
-                port={selectedPort}
-                onClose={() => setSelectedPort(null)}
-                onSetAsStart={handleSetStartPort}
-                onSetAsEnd={handleSetEndPort}
-              />
-            )}
-            
-            {/* Route Calculator Panel */}
-            {activePanel === 'routes' && (
-              <RouteCalculator 
+          {/* Route Calculator */}
+          {activePanel === 'routes' && (
+            <>
+              <RouteCalculator
                 startPort={startPort}
                 endPort={endPort}
                 onCalculate={handleCalculateRoute}
-                className="animate-scale-in"
               />
-            )}
-            
-            {/* Weather Panel */}
-            {activePanel === 'weather' && routeData && (
-              <WeatherOverlay 
-                routeWaypoints={routeData.route.waypoints}
-                centerCoordinates={mapCenter}
-                className="animate-scale-in"
-              />
-            )}
-          </div>
+              <TravelHistory className="mt-4" />
+            </>
+          )}
+          
+          {/* Port Information */}
+          {activePanel === 'ports' && selectedPort && (
+            <PortInfo 
+              port={selectedPort}
+              onClose={() => setSelectedPort(null)}
+              onSetAsStart={handleSetStartPort}
+              onSetAsEnd={handleSetEndPort}
+            />
+          )}
+          
+          {/* Weather Overlay Controls */}
+          {activePanel === 'weather' && (
+            <WeatherOverlay 
+              centerCoordinates={mapCenter}
+              routeWaypoints={routeData?.route?.waypoints || []}
+            />
+          )}
         </div>
+        
+        {/* Mobile Panel Toggle */}
+        {isMobileView && activePanel && (
+          <button
+            onClick={togglePanelMinimize}
+            className="absolute bottom-4 right-4 p-2 bg-white dark:bg-gray-800 rounded-full shadow-lg"
+          >
+            <ChevronUp
+              className={cn(
+                "transform transition-transform",
+                isPanelMinimized ? "rotate-180" : ""
+              )}
+            />
+          </button>
+        )}
       </div>
     </div>
   );

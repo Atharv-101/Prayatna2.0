@@ -1,6 +1,6 @@
-
 import { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { CloudSun, Wind, Droplets, Eye, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { getWeatherForLocation, getRouteRiskAssessment, WeatherData } from '@/utils/weatherUtils';
@@ -8,11 +8,15 @@ import { cn } from '@/lib/utils';
 
 interface WeatherOverlayProps {
   routeWaypoints?: [number, number][];
-  centerCoordinates: [number, number];
+  centerCoordinates?: [number, number];
   className?: string;
 }
 
-const WeatherOverlay = ({ routeWaypoints, centerCoordinates, className }: WeatherOverlayProps) => {
+const WeatherOverlay = ({ 
+  routeWaypoints = [], 
+  centerCoordinates = [0, 0], 
+  className = "" 
+}: WeatherOverlayProps) => {
   const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [routeForecasts, setRouteForecasts] = useState<WeatherData[]>([]);

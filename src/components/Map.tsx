@@ -298,299 +298,60 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
     
     routesSource.clear();
     
+    const getRouteStyle = (type: 'fastest' | 'economic' | 'safe') => {
+      switch (type) {
+        case 'fastest':
+          return {
+            color: 'rgba(0, 123, 255, 0.8)',
+            width: 4,
+            dash: undefined
+          };
+        case 'economic':
+          return {
+            color: 'rgba(40, 167, 69, 0.8)',
+            width: 4,
+            dash: [8, 4]
+          };
+        case 'safe':
+          return {
+            color: 'rgba(108, 117, 125, 0.8)',
+            width: 4,
+            dash: [4, 4]
+          };
+      }
+    };
+
     if (routeData.waypoints && routeData.waypoints.length > 1) {
-      // Helper function to check if a point is in water
-      const isInWater = (lon: number, lat: number): boolean => {
-        // Safety margin in degrees (approximately 30km)
-        const SAFETY_MARGIN = 0.3;
-        
-        // Additional safety check for points too close to shore
-        const MIN_SHORE_DISTANCE = 0.2;
-
-        // Indian Subcontinent - More detailed coastline
-        const landMasses = [
-          [[72.8, 19.2], [72.5, 19], [72.8, 18.9], // Mumbai coast
-           [73, 18], [73.5, 17], [74, 16], [74.5, 15], [75, 14], [75.5, 13], 
-           [76, 12], [76.5, 11], [77, 10], [77.5, 9], [78, 8.5], // West coast detail
-           [79, 8], [79.5, 7.5], [80, 7], [80.5, 6.5], // Southern tip
-           [81, 7], [81.5, 8], [82, 9], [82.5, 10], [83, 11], 
-           [83.5, 12], [84, 13], [84.5, 14], [85, 15], // East coast detail
-           [85.5, 16], [86, 17], [86.5, 18], [87, 19], [88, 20], 
-           [89, 21], [90, 22], [91, 22]], // Up to Bangladesh
-
-          // Sri Lanka - More detailed
-          [[79.5, 5.8], [79.8, 6], [80, 6.2], [80.2, 6.5], [80.5, 7],
-           [81, 7.5], [81.5, 7.8], [81.8, 8], [81.9, 8.5], [81.7, 9],
-           [81.5, 9.2], [81, 9.5], [80.5, 9.3], [80, 9], [79.8, 8.5],
-           [79.5, 8], [79.3, 7.5], [79.2, 6.8], [79.3, 6.2]],
-        ];
-
-        // Known safe shipping lanes with more detail
-        const shippingLanes = [
-          // Mumbai to Gulf route - Southern path
-          [[72.8, 18.9], [72.5, 17], [73, 15], [73.5, 13], [74, 12], 
-           [75, 11], [76, 10], [77, 9], [78, 8], [79, 7.5], 
-           [80, 7], [81, 6.5], [82, 6], [83, 6], [84, 6], 
-           [85, 6], [86, 6], [87, 6], [88, 6], [89, 6],
-           [90, 6], [91, 6], [92, 6], [93, 6], [94, 6],
-           [95, 5], [96, 4], [97, 3], [98, 2], [99, 1.5],
-           [100, 1.3], [101, 1.2], [102, 1.2], [103, 1.3], [103.8, 1.3]], // To Singapore
-
-          // Alternative deeper southern route
-          [[72.8, 18.9], [73, 16], [74, 14], [75, 12], [76, 10],
-           [77, 8], [78, 7], [79, 6], [80, 5], [81, 4],
-           [82, 4], [83, 4], [84, 4], [85, 4], [90, 4],
-           [95, 3], [100, 2], [103.8, 1.3]]
-        ];
-
-        // Check shipping lanes first with increased tolerance
-        for (const lane of shippingLanes) {
-          for (let i = 0; i < lane.length - 1; i++) {
-            const start: [number, number] = [lane[i][0], lane[i][1]];
-            const end: [number, number] = [lane[i + 1][0], lane[i + 1][1]];
-            const dist = pointToLineDistance([lon, lat] as [number, number], start, end);
-            if (dist < 1.5) { // Increased tolerance for shipping lanes
-              // Additional check to ensure we're not too close to shore
-              let tooCloseToShore = false;
-              for (const landMass of landMasses) {
-                for (let j = 0; j < landMass.length; j++) {
-                  const point = landMass[j];
-                  const dx = lon - point[0];
-                  const dy = lat - point[1];
-                  const dist = Math.sqrt(dx * dx + dy * dy);
-                  if (dist < MIN_SHORE_DISTANCE) {
-                    tooCloseToShore = true;
-                    break;
-                  }
-                }
-                if (tooCloseToShore) break;
-              }
-              if (!tooCloseToShore) return true;
-            }
-          }
-        }
-
-        // Check against land masses with safety margin
-        for (const landMass of landMasses) {
-          // Add safety margin to land mass
-          const expandedLandMass = landMass.map(point => {
-            return [point[0], point[1]] as [number, number];
-          });
-
-          let inside = false;
-          for (let i = 0, j = expandedLandMass.length - 1; i < expandedLandMass.length; j = i++) {
-            const xi = expandedLandMass[i][0], yi = expandedLandMass[i][1];
-            const xj = expandedLandMass[j][0], yj = expandedLandMass[j][1];
-            
-            // Check if point is within safety margin of land
-            const distToSegment = pointToLineDistance(
-              [lon, lat] as [number, number], 
-              [xi, yi] as [number, number], 
-              [xj, yj] as [number, number]
-            );
-            if (distToSegment < SAFETY_MARGIN) {
-              return false;
-            }
-            
-            if (((yi > lat) !== (yj > lat)) &&
-                (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-              inside = !inside;
-            }
-          }
-          if (inside) return false;
-        }
-        return true;
-      };
-
-      // Helper function to calculate point to line distance
-      const pointToLineDistance = (point: [number, number], lineStart: [number, number], lineEnd: [number, number]): number => {
-        const x = point[0];
-        const y = point[1];
-        const x1 = lineStart[0];
-        const y1 = lineStart[1];
-        const x2 = lineEnd[0];
-        const y2 = lineEnd[1];
-        
-        const A = x - x1;
-        const B = y - y1;
-        const C = x2 - x1;
-        const D = y2 - y1;
-        
-        const dot = A * C + B * D;
-        const len_sq = C * C + D * D;
-        
-        let param = -1;
-        if (len_sq !== 0) {
-          param = dot / len_sq;
-        }
-        
-        let xx, yy;
-        
-        if (param < 0) {
-          xx = x1;
-          yy = y1;
-        } else if (param > 1) {
-          xx = x2;
-          yy = y2;
-        } else {
-          xx = x1 + param * C;
-          yy = y1 + param * D;
-        }
-        
-        const dx = x - xx;
-        const dy = y - yy;
-        
-        return Math.sqrt(dx * dx + dy * dy);
-      };
-
-      // Enhance createCurvedPath function
-      const createCurvedPath = (points: [number, number][]): [number, number][] => {
-        if (points.length < 2) return [];
-        
-        const coordinates: [number, number][] = [];
-        
-        for (let i = 0; i < points.length - 1; i++) {
-          const start = points[i];
-          const end = points[i + 1];
-          
-          // Calculate direct distance
-          const dx = end[0] - start[0];
-          const dy = end[1] - start[1];
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          
-          // If distance is large, add intermediate waypoints
-          if (distance > 5) {
-            const steps = Math.ceil(distance / 3); // One point every ~3 degrees
-            let validPath = false;
-            let attempts = 0;
-            const maxAttempts = 12; // Increased attempts
-            
-            while (!validPath && attempts < maxAttempts) {
-              const testCoords: [number, number][] = [];
-              validPath = true;
-              
-              // Try different curve orientations
-              const angleOffset = (Math.PI / 6) * (attempts % 2 === 0 ? 1 : -1) * (Math.floor(attempts / 2) + 1);
-              const controlDist = Math.min(distance / 4, 4);
-              
-              const angle = Math.atan2(dy, dx);
-              const ctrl1: [number, number] = [
-                start[0] + controlDist * Math.cos(angle + angleOffset),
-                start[1] + controlDist * Math.sin(angle + angleOffset)
-              ];
-              
-              if (i === 0) {
-                testCoords.push([...start]);
-              }
-              
-              // Generate more points for smoother curves
-              for (let step = 0; step <= steps; step++) {
-                const t = step / steps;
-                const u = 1 - t;
-                
-                const x = u * u * start[0] + 2 * u * t * ctrl1[0] + t * t * end[0];
-                const y = u * u * start[1] + 2 * u * t * ctrl1[1] + t * t * end[1];
-                
-                // Validate each point
-                if (!isInWater(x, y)) {
-                  validPath = false;
-                  break;
-                }
-                
-                testCoords.push([x, y] as [number, number]);
-              }
-              
-              if (validPath) {
-                coordinates.push(...testCoords);
-                break;
-              }
-              
-              attempts++;
-            }
-            
-            // If no valid curved path, try straight line with water point finding
-            if (!validPath) {
-              if (i === 0) {
-                coordinates.push([...start]);
-              }
-              
-              for (let step = 1; step <= steps; step++) {
-                const t = step / steps;
-                let x = start[0] + dx * t;
-                let y = start[1] + dy * t;
-                
-                // Find nearest water point if needed
-                if (!isInWater(x, y)) {
-                  let found = false;
-                  for (let radius = 0.2; radius <= 2; radius += 0.2) {
-                    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
-                      const testX = x + radius * Math.cos(angle);
-                      const testY = y + radius * Math.sin(angle);
-                      if (isInWater(testX, testY)) {
-                        x = testX;
-                        y = testY;
-                        found = true;
-                        break;
-                      }
-                    }
-                    if (found) break;
-                  }
-                }
-                
-                coordinates.push([x, y] as [number, number]);
-              }
-            }
-          } else {
-            // For short distances, use direct line with validation
-            if (i === 0) {
-              coordinates.push([...start]);
-            }
-            coordinates.push([...end]);
-          }
-        }
-        
-        return coordinates;
-      };
-      
-      // Create the main route with curved path
-      const curvedCoordinates = createCurvedPath(routeData.waypoints);
+      // Create the main route feature
       const mainRouteFeature = new Feature({
-        geometry: new geom.LineString(curvedCoordinates)
+        geometry: new geom.LineString(routeData.waypoints)
       });
       
-      // Enhanced route style with gradient and glow effect
+      const routeStyle = getRouteStyle(routeData.type);
       mainRouteFeature.setStyle(new style.Style({
         stroke: new style.Stroke({
-          color: 'rgba(0, 123, 255, 0.8)',
-          width: 4,
+          color: routeStyle.color,
+          width: routeStyle.width,
           lineCap: 'round',
           lineJoin: 'round',
-          lineDash: undefined
-        }),
-        // Add glow effect
-        fill: new style.Fill({
-          color: 'rgba(0, 123, 255, 0.2)'
+          lineDash: routeStyle.dash
         })
       }));
       
       routesSource.addFeature(mainRouteFeature);
       
-      // Add waypoint markers with improved styling
+      // Add waypoint markers
       routeData.waypoints.forEach((waypoint, index) => {
         if (index > 0 && index < routeData.waypoints.length - 1) {
           const waypointFeature = new Feature({
-            geometry: new geom.Point(waypoint),
-            properties: {
-              index,
-              type: 'waypoint'
-            }
+            geometry: new geom.Point(waypoint)
           });
           
           waypointFeature.setStyle(new style.Style({
             image: new style.Circle({
               radius: 4,
               fill: new style.Fill({
-                color: 'rgba(0, 123, 255, 0.8)'
+                color: routeStyle.color
               }),
               stroke: new style.Stroke({
                 color: 'rgba(255, 255, 255, 0.9)',
@@ -602,53 +363,6 @@ const Map = ({ onPortClick, selectedPorts, routeData, className }: MapProps) => 
           routesSource.addFeature(waypointFeature);
         }
       });
-      
-      // Add checkpoints with enhanced styling
-      if (routeData.journeyDetails && routeData.journeyDetails.checkpoints) {
-        routeData.journeyDetails.checkpoints.forEach((checkpoint, index) => {
-          if (index > 0 && index < routeData.journeyDetails.checkpoints.length - 1) {
-            const checkpointFeature = new Feature({
-              geometry: new geom.Point(checkpoint.position),
-              properties: {
-                index,
-                time: checkpoint.estimatedTime,
-                distance: checkpoint.distance,
-                type: 'checkpoint'
-              }
-            });
-            
-            checkpointFeature.setStyle(new style.Style({
-              image: new style.Circle({
-                radius: 6,
-                fill: new style.Fill({
-                  color: 'rgba(0, 123, 255, 0.9)'
-                }),
-                stroke: new style.Stroke({
-                  color: 'rgba(255, 255, 255, 1)',
-                  width: 2
-                })
-              }),
-              text: new style.Text({
-                text: `${checkpoint.estimatedTime}\n${checkpoint.distance}km`,
-                offsetY: -20,
-                textAlign: 'center',
-                textBaseline: 'bottom',
-                font: '12px sans-serif',
-                fill: new style.Fill({
-                  color: 'rgba(0, 123, 255, 1)'
-                }),
-                stroke: new style.Stroke({
-                  color: 'rgba(255, 255, 255, 0.9)',
-                  width: 3
-                }),
-                padding: [5, 5, 5, 5]
-              })
-            }));
-            
-            routesSource.addFeature(checkpointFeature);
-          }
-        });
-      }
       
       // Fit view to show entire route with padding
       const extent = routesSource.getExtent();
