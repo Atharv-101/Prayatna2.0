@@ -1,6 +1,28 @@
 import { calculateDistance, calculateWaypoints } from './mapUtils';
 import { getRouteWeatherForecast, getRouteRiskAssessment } from './weatherUtils';
 
+// Add types at the top of the file
+interface WeatherForecast {
+  description: string;
+  temperature: number;
+  windSpeed: number;
+  windDirection: number;
+  waveHeight: number;
+  precipitation: number;
+  visibility: number;
+  pressure: number;
+  humidity: number;
+  seaTemp: number;
+  currentSpeed: number;
+  currentDirection: number;
+}
+
+interface WeatherRisk {
+  level: 'low' | 'medium' | 'high';
+  description: string;
+  recommendations: string[];
+}
+
 // Route calculation options interface
 export interface RouteOptions {
   startPortId: string;
@@ -28,682 +50,511 @@ export interface RouteResult {
   journeyDetails: {
     estimatedArrival: string; // formatted date/time
     fuelCostEstimate: number; // in USD
-    checkpoints: {
-      position: [number, number];
-      estimatedTime: string; // formatted date/time
-      distance: number; // distance from start in km
-      weatherForecast?: {
-        description: string;
-        temperature: number;
-        windSpeed: number;
-      };
-    }[];
+    checkpoints: CheckpointInfo[];
     totalDurationHours: number; // Total duration in hours (for calculations)
   };
 }
 
-// Enhanced land mass coordinates with more detailed Mediterranean coastline
-const landMassCoordinates = [
-  // European Mediterranean coast (more detailed)
-  [[0, 43], [3, 43], [7, 44], [10, 44], [12, 45], [14, 45], [16, 41], [18, 40], [20, 38]], // Southern Europe
-  [[20, 38], [22, 37], [25, 35], [26, 40], [28, 41]], // Greece and Turkey
-  // North African Mediterranean coast
-  [[-5, 35], [0, 36], [5, 37], [10, 33], [15, 32], [20, 32], [25, 32], [30, 31]], // North Africa
-  // Middle East coast
-  [[30, 31], [32, 31], [34, 32], [35, 33], [35, 35]], // Levant coast
-  // Add other existing landmasses...
-];
+// Add WeatherData interface
+interface WeatherData {
+  description?: string;
+  temperature?: number;
+  windSpeed?: number;
+  windDirection?: number;
+  waveHeight?: number;
+  precipitation?: number;
+  visibility?: number;
+  pressure?: number;
+  humidity?: number;
+  seaTemp?: number;
+  currentSpeed?: number;
+  currentDirection?: number;
+}
 
-// Mediterranean Sea specific waypoints for safe navigation
-const mediterraneanSeaLanes: [number, number][][] = [
-  // Main East-West Mediterranean route
-  [[5, 37.5], [8, 38], [11, 39], [15, 38], [18, 37], [20, 36], [25, 35], [30, 33]], // Central Mediterranean
-  // Alternative routes
-  [[5, 38], [10, 39], [15, 37], [20, 35]], // Southern route
-  [[5, 39], [10, 40], [15, 39], [20, 37]] // Northern route
-];
-
-// Enhanced land detection with stricter safety margins
-const isPointNearLand = (lon: number, lat: number): boolean => {
-  // Increased safety margin to 150km for stricter land avoidance
-  const safetyMargin = 150; // km
-  
-  for (const coastline of landMassCoordinates) {
-    for (let i = 0; i < coastline.length; i++) {
-      const [x1, y1] = coastline[i];
-      
-      const R = 6371; // Earth's radius in km
-      const dLat = (lat - y1) * Math.PI / 180;
-      const dLon = (lon - x1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(y1 * Math.PI / 180) * Math.cos(lat * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      const distance = R * c;
-      
-      if (distance < safetyMargin) {
-        return true;
-      }
-    }
-  }
-  return false;
-};
-
-// Enhanced sea point finding with more aggressive search
-const findNearestSeaPoint = (lon: number, lat: number): [number, number] => {
-  if (!isPointNearLand(lon, lat)) return [lon, lat];
-  
-  // More comprehensive search pattern (every 5 degrees)
-  const directions = Array.from({ length: 72 }, (_, i) => {
-    const angle = (i * 5) * Math.PI / 180;
-    return [Math.cos(angle), Math.sin(angle)];
-  });
-  
-  // More granular distance steps and increased search radius
-  for (let distance = 1; distance <= 1000; distance += 1) {
-    for (const [dx, dy] of directions) {
-      const newLon = lon + dx * distance / 111;
-      const newLat = lat + dy * distance / 111;
-      
-      if (newLon >= -180 && newLon <= 180 && newLat >= -90 && newLat <= 90) {
-        if (!isPointNearLand(newLon, newLat)) {
-          return [newLon, newLat];
-        }
-      }
-    }
-  }
-  
-  return findNearestOceanPoint(lon, lat);
-};
-
-// Helper function to find nearest ocean point
-const findNearestOceanPoint = (lon: number, lat: number): [number, number] => {
-  const oceanCenters = [
-    [15, 38],   // Mediterranean Sea
-    [0, 0],     // Indian Ocean
-    [-150, 0],  // Pacific Ocean
-    [30, 0],    // Atlantic Ocean
-    [120, -60], // Southern Ocean
-    [100, 20],  // South China Sea
-    [-80, 25],  // Caribbean
-    [140, 35]   // East China Sea
-  ];
-  
-  let bestPoint: [number, number] = [lon, lat];
-  let minDistance = Infinity;
-  
-  for (const [centerLon, centerLat] of oceanCenters) {
-    const R = 6371;
-    const dLat = (centerLat - lat) * Math.PI / 180;
-    const dLon = (centerLon - lon) * Math.PI / 180;
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat * Math.PI / 180) * Math.cos(centerLat * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c;
-    
-    if (distance < minDistance) {
-      minDistance = distance;
-      bestPoint = [centerLon, centerLat] as [number, number];
-    }
-  }
-  
-  return bestPoint;
-};
-
-// Major shipping lanes for route optimization
-const majorShippingLanes: [number, number][][] = [
-  // Asia to Europe
-  [[120, 30], [100, 20], [60, 30], [30, 35], [0, 45]],
-  // Asia to North America
-  [[120, 30], [100, 20], [0, 0], [-150, 0], [-120, 35]],
-  // Europe to North America
-  [[0, 45], [-30, 40], [-60, 35], [-90, 35], [-120, 35]],
-  // Asia to Australia
-  [[120, 30], [130, 20], [140, 10], [150, -20], [160, -30]]
-];
-
-// Find nearest shipping lane
-const findNearestShippingLane = (lon: number, lat: number): [number, number][] => {
-  let nearestLane = majorShippingLanes[0];
-  let minDistance = Infinity;
-  
-  for (const lane of majorShippingLanes) {
-    let laneDistance = 0;
-    for (const point of lane) {
-      const R = 6371;
-      const dLat = (point[1] - lat) * Math.PI / 180;
-      const dLon = (point[0] - lon) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat * Math.PI / 180) * Math.cos(point[1] * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      laneDistance += R * c;
-    }
-    laneDistance /= lane.length;
-    
-    if (laneDistance < minDistance) {
-      minDistance = laneDistance;
-      nearestLane = lane;
-    }
-  }
-  
-  return nearestLane;
-};
-
-// Maritime zones and constraints
-interface MaritimeZone {
-  name: string;
-  type: 'ECA' | 'SECA' | 'PIRACY' | 'ICE';
-  coordinates: [number, number][];
-  description: string;
-  restrictions?: {
-    maxSpeed?: number;
-    minDistance?: number;
-    requiresEscort?: boolean;
+// Add new interface for detailed checkpoint information
+interface CheckpointInfo {
+  position: [number, number];
+  estimatedTime: string;
+  distance: number;
+  weatherForecast: {
+    description: string;
+    temperature: number;
+    windSpeed: number;
+    windDirection: number;
+    waveHeight: number;
+    precipitation: number;
+    visibility: number;
+    pressure: number;
+    humidity: number;
+    seaTemp: number;
+    currentSpeed: number;
+    currentDirection: number;
+  };
+  navigationInfo: {
+    distanceFromStart: number;
+    distanceToNext: number;
+    bearing: number;
+    estimatedSpeed: number;
+    fuelConsumption: number;
+    timeToNext: string;
+  };
+  safetyInfo: {
+    nearestPort: string;
+    nearestPortDistance: number;
+    riskLevel: 'low' | 'medium' | 'high';
+    warnings: string[];
+    recommendations: string[];
   };
 }
 
-// Define major maritime zones
-const maritimeZones: MaritimeZone[] = [
-  {
-    name: 'North Sea ECA',
-    type: 'ECA',
-    coordinates: [[-5, 55], [10, 55], [10, 60], [-5, 60]],
-    description: 'North Sea Emission Control Area',
-    restrictions: { maxSpeed: 12 }
-  },
-  {
-    name: 'Baltic Sea SECA',
-    type: 'SECA',
-    coordinates: [[10, 55], [30, 55], [30, 65], [10, 65]],
-    description: 'Baltic Sea Sulphur Emission Control Area',
-    restrictions: { maxSpeed: 12 }
-  },
-  {
-    name: 'Gulf of Aden Piracy Zone',
-    type: 'PIRACY',
-    coordinates: [[45, 10], [55, 10], [55, 15], [45, 15]],
-    description: 'High risk piracy area',
-    restrictions: { requiresEscort: true }
-  },
-  {
-    name: 'Arctic Ice Zone',
-    type: 'ICE',
-    coordinates: [[-180, 70], [180, 70], [180, 90], [-180, 90]],
-    description: 'Arctic ice zone requiring ice-class vessels',
-    restrictions: { requiresEscort: true }
-  }
+// Update the landMasses array with more precise coastal points
+const landMasses = [
+  // Japan main islands (detailed coastline)
+  [[129.33, 33.23], // Fukuoka North
+   [129.87, 32.75], // Nagasaki
+   [130.20, 32.24], // Kumamoto
+   [130.40, 31.90], // Kagoshima
+   [131.12, 31.58], // Southern Kyushu
+   [131.47, 31.80], // Miyazaki
+   [132.55, 32.45], // Kochi
+   [133.53, 33.55], // Tokushima
+   [134.69, 34.07], // Wakayama
+   [135.43, 34.65], // Osaka
+   [136.90, 34.90], // Nagoya
+   [137.72, 34.70], // Shizuoka
+   [138.64, 35.10], // Mount Fuji
+   [139.77, 35.45], // Tokyo
+   [140.87, 36.10], // Ibaraki
+   [140.97, 36.95], // Fukushima
+   [141.15, 38.26], // Sendai
+   [141.35, 39.58], // Iwate
+   [141.47, 40.83], // Aomori
+   [140.72, 41.77], // Hokkaido South
+   [141.35, 42.65], // Hokkaido East
+   [142.95, 43.82], // Hokkaido North
+   [144.37, 43.38], // Hokkaido Northeast
+   [145.52, 43.15]], // Hokkaido East tip
+
+  // South Korea (detailed coastline)
+  [[126.45, 37.50], // Incheon
+   [126.37, 36.90],
+   [126.52, 36.32],
+   [126.48, 35.95],
+   [127.35, 34.85],
+   [127.75, 34.72],
+   [128.15, 34.95],
+   [128.60, 35.10],
+   [129.05, 35.15],
+   [129.45, 35.50], // Busan
+   [129.57, 35.95],
+   [129.45, 36.63],
+   [129.37, 37.25],
+   [129.12, 37.65],
+   [128.85, 38.30]], // East coast
+
+  // China East Coast (detailed)
+  [[117.72, 38.97], // Tianjin
+   [118.12, 38.72],
+   [118.97, 37.85],
+   [119.52, 37.12],
+   [120.32, 36.27], // Qingdao
+   [121.45, 35.42],
+   [121.85, 34.75],
+   [121.97, 33.92],
+   [121.82, 32.85],
+   [121.52, 31.67], // Shanghai
+   [120.15, 30.27], // Hangzhou
+   [119.65, 29.12],
+   [119.02, 27.35],
+   [118.77, 26.15],
+   [118.15, 24.82]], // Xiamen
+
+  // Taiwan (detailed)
+  [[121.45, 25.18], // Keelung
+   [121.92, 25.05], // Northeast
+   [121.87, 24.72],
+   [121.62, 24.02],
+   [121.37, 23.10],
+   [120.85, 22.02], // South
+   [120.25, 22.57],
+   [120.20, 23.05],
+   [120.32, 23.75],
+   [120.52, 24.42],
+   [121.00, 25.00]], // North
+
+  // Philippines (main islands outline)
+  [[120.23, 18.22], // Luzon North
+   [121.65, 18.47],
+   [122.12, 16.92],
+   [123.97, 13.67],
+   [124.27, 12.32],
+   [125.52, 11.27], // Samar
+   [125.37, 10.12],
+   [124.97, 9.77],
+   [123.92, 9.57],
+   [123.15, 9.42], // Cebu
+   [122.52, 9.83],
+   [121.97, 10.82],
+   [120.92, 11.37],
+   [120.47, 11.92],
+   [119.77, 12.77]], // Mindoro
+
+  // Vietnam Coast (detailed)
+  [[108.82, 19.27], // Central
+   [109.12, 18.72],
+   [109.40, 17.97],
+   [108.92, 16.62],
+   [108.37, 15.92],
+   [108.20, 14.52],
+   [109.12, 13.37],
+   [109.27, 12.25],
+   [109.42, 11.45],
+   [108.87, 10.72],
+   [107.02, 10.37], // South
+   [106.62, 10.22],
+   [106.22, 9.95],
+   [105.72, 9.77],
+   [104.82, 9.52]], // Gulf of Thailand
+
+  // Thailand Gulf Coast
+  [[100.42, 13.72], // Bangkok
+   [100.92, 13.32],
+   [101.27, 12.92],
+   [101.87, 12.67],
+   [102.52, 12.47],
+   [102.92, 12.17],
+   [102.37, 11.77],
+   [101.82, 10.97],
+   [100.92, 9.82],
+   [100.22, 8.92]], // South
+
+  // Malaysia & Singapore (detailed)
+  [[103.85, 1.42], // Singapore
+   [103.62, 1.27],
+   [103.42, 1.17],
+   [102.87, 1.47],
+   [102.42, 1.97],
+   [101.97, 2.42],
+   [101.42, 2.92],
+   [100.92, 3.42],
+   [100.42, 3.92],
+   [100.12, 4.42],
+   [99.87, 4.92],
+   [99.62, 5.42],
+   [99.42, 5.92]], // North
+
+  // Indonesia (major islands outline)
+  [[95.32, 5.57], // Sumatra North
+   [96.12, 5.27],
+   [97.42, 4.92],
+   [98.72, 4.27],
+   [100.12, 3.72],
+   [101.42, 2.92],
+   [102.72, 2.27],
+   [103.92, 1.62],
+   [104.42, 1.12],
+   [105.92, 0.42]], // Sumatra South
+
+  // India East Coast (detailed)
+  [[88.42, 21.92], // West Bengal
+   [87.92, 21.42],
+   [86.92, 20.92],
+   [86.42, 20.42],
+   [85.92, 19.82],
+   [85.12, 19.22],
+   [84.42, 18.42],
+   [83.92, 17.92],
+   [83.42, 17.42],
+   [82.92, 16.92],
+   [82.12, 16.42],
+   [81.42, 15.92],
+   [80.92, 15.42],
+   [80.42, 14.92],
+   [80.12, 14.42],
+   [79.92, 13.92],
+   [79.82, 13.42],
+   [79.92, 12.92],
+   [79.82, 12.42],
+   [79.42, 11.92],
+   [79.12, 11.42],
+   [78.92, 10.92],
+   [78.42, 10.42],
+   [77.92, 9.92],
+   [77.42, 9.42],
+   [77.12, 8.92],
+   [76.92, 8.42]], // Kerala
+
+  // Sri Lanka (detailed)
+  [[79.87, 9.82],
+   [80.12, 9.67],
+   [80.52, 9.42],
+   [80.87, 9.27],
+   [81.22, 9.12],
+   [81.62, 8.92],
+   [81.87, 8.42],
+   [81.72, 7.92],
+   [81.52, 7.42],
+   [81.22, 6.92],
+   [80.92, 6.42],
+   [80.52, 6.12],
+   [80.12, 5.92],
+   [79.92, 6.12],
+   [79.72, 6.42],
+   [79.52, 6.92],
+   [79.42, 7.42],
+   [79.32, 7.92],
+   [79.42, 8.42],
+   [79.52, 8.92],
+   [79.72, 9.42]], // North
+
+  // UAE & Oman (detailed coastline)
+  [[51.35, 24.45], // Abu Dhabi West
+   [51.58, 24.47], // Abu Dhabi Port
+   [51.95, 24.48], // Between Abu Dhabi and Dubai
+   [52.60, 24.45],
+   [53.20, 24.42],
+   [53.85, 24.40],
+   [54.15, 24.42], // Approaching Dubai
+   [54.28, 24.45], // Dubai West
+   [54.32, 24.47], // Dubai Main Port
+   [54.38, 24.48], // Dubai Creek
+   [54.45, 24.49], // Dubai Central
+   [54.52, 24.51], // Dubai East
+   [54.65, 24.55], // Sharjah West
+   [54.72, 24.58], // Sharjah Port
+   [54.85, 24.65], // Sharjah East
+   [55.05, 24.75], // Ajman
+   [55.15, 24.85], // Umm Al Quwain
+   [55.35, 24.95], // Ras Al Khaimah South
+   [55.55, 25.15], // Ras Al Khaimah
+   [55.75, 25.35], // Approaching Musandam
+   [55.95, 25.55],
+   [56.15, 25.75],
+   [56.35, 25.95], // Musandam Peninsula
+   [56.45, 26.15],
+   [56.52, 26.25], // Musandam Tip
+   // Oman Coast
+   [56.65, 26.15],
+   [56.85, 25.95],
+   [57.05, 25.75],
+   [57.25, 25.45],
+   [57.45, 25.15],
+   [57.65, 24.85],
+   [57.85, 24.55],
+   [58.05, 24.25],
+   [58.25, 23.95],
+   [58.45, 23.65],
+   [58.65, 23.35]], // Oman South
 ];
 
-// Canal constraints
-interface CanalConstraint {
-  name: string;
-  coordinates: [number, number][];
-  maxDraft: number;
-  maxLength: number;
-  maxBeam: number;
-  description: string;
+// Increase safety margins for better land avoidance
+function isInWater(lon: number, lat: number): boolean {
+  const SAFETY_MARGIN = 0.5; // Increased from 0.3
+  const GULF_MARGIN = 0.4;  // Increased from 0.2
+  
+  // Additional check for Gulf region
+  if (lon >= 51.0 && lon <= 57.0 && lat >= 23.5 && lat <= 26.5) {
+    for (const landMass of landMasses.slice(0, 2)) { // Check only UAE and Oman coastlines
+      for (let i = 0; i < landMass.length - 1; i++) {
+        const [x1, y1] = landMass[i];
+        const [x2, y2] = landMass[i + 1];
+        
+        // Calculate distance to line segment
+        const A = lon - x1;
+        const B = lat - y1;
+        const C = x2 - x1;
+        const D = y2 - y1;
+
+        const dot = A * C + B * D;
+        const len_sq = C * C + D * D;
+        
+        let param = -1;
+        if (len_sq != 0) {
+          param = dot / len_sq;
+        }
+
+        let xx, yy;
+        if (param < 0) {
+          xx = x1;
+          yy = y1;
+        } else if (param > 1) {
+          xx = x2;
+          yy = y2;
+        } else {
+          xx = x1 + param * C;
+          yy = y1 + param * D;
+        }
+
+        const dx = lon - xx;
+        const dy = lat - yy;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < GULF_MARGIN) {
+          return false;
+        }
+      }
+    }
+  }
+
+  // Regular check for other areas
+  for (const landMass of landMasses) {
+    for (let i = 0; i < landMass.length - 1; i++) {
+      const [x1, y1] = landMass[i];
+      const [x2, y2] = landMass[i + 1];
+      
+      const A = lon - x1;
+      const B = lat - y1;
+      const C = x2 - x1;
+      const D = y2 - y1;
+
+      const dot = A * C + B * D;
+      const len_sq = C * C + D * D;
+      
+      let param = -1;
+      if (len_sq != 0) {
+        param = dot / len_sq;
+      }
+
+      let xx, yy;
+      if (param < 0) {
+        xx = x1;
+        yy = y1;
+      } else if (param > 1) {
+        xx = x2;
+        yy = y2;
+      } else {
+        xx = x1 + param * C;
+        yy = y1 + param * D;
+      }
+
+      const dx = lon - xx;
+      const dy = lat - yy;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < SAFETY_MARGIN) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
-const canalConstraints: CanalConstraint[] = [
-  {
-    name: 'Panama Canal',
-    coordinates: [[-80, 9], [-79, 9], [-79, 10], [-80, 10]],
-    maxDraft: 15.2,
-    maxLength: 366,
-    maxBeam: 49,
-    description: 'Panama Canal size restrictions'
-  },
-  {
-    name: 'Suez Canal',
-    coordinates: [[32, 30], [33, 30], [33, 31], [32, 31]],
-    maxDraft: 20.1,
-    maxLength: 400,
-    maxBeam: 77.5,
-    description: 'Suez Canal size restrictions'
-  }
-];
-
-// Check if a point is in a maritime zone
-const isInMaritimeZone = (lon: number, lat: number): MaritimeZone | null => {
-  for (const zone of maritimeZones) {
-    // Simple polygon containment check
-    let inside = false;
-    for (let i = 0, j = zone.coordinates.length - 1; i < zone.coordinates.length; j = i++) {
-      const xi = zone.coordinates[i][0], yi = zone.coordinates[i][1];
-      const xj = zone.coordinates[j][0], yj = zone.coordinates[j][1];
-      
-      if (((yi > lat) !== (yj > lat)) &&
-          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    
-    if (inside) {
-      return zone;
-    }
-  }
-  return null;
-};
-
-// Check canal constraints
-const checkCanalConstraints = (lon: number, lat: number, vessel: {
-  draft: number;
-  length: number;
-  beam: number;
-}): CanalConstraint | null => {
-  for (const canal of canalConstraints) {
-    // Simple polygon containment check
-    let inside = false;
-    for (let i = 0, j = canal.coordinates.length - 1; i < canal.coordinates.length; j = i++) {
-      const xi = canal.coordinates[i][0], yi = canal.coordinates[i][1];
-      const xj = canal.coordinates[j][0], yj = canal.coordinates[j][1];
-      
-      if (((yi > lat) !== (yj > lat)) &&
-          (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
-        inside = !inside;
-      }
-    }
-    
-    if (inside) {
-      if (vessel.draft > canal.maxDraft ||
-          vessel.length > canal.maxLength ||
-          vessel.beam > canal.maxBeam) {
-        return canal;
-      }
-    }
-  }
-  return null;
-};
-
-// Enhanced segment crossing check
-const doesSegmentCrossLand = (
-  start: [number, number],
-  end: [number, number],
-  numChecks: number = 100  // Increased number of checks
-): boolean => {
-  for (let i = 0; i <= numChecks; i++) {
-    const fraction = i / numChecks;
-    const lon = start[0] + (end[0] - start[0]) * fraction;
-    const lat = start[1] + (end[1] - start[1]) * fraction;
-    
-    if (isPointNearLand(lon, lat)) {
-      return true;
-    }
-  }
-  return false;
-};
-
-// Enhanced safe path finding with strict water-only routing
-const findSafeSeaPath = (
-  start: [number, number],
-  end: [number, number],
-  maxAttempts: number = 30  // Increased max attempts
-): [number, number][] => {
-  // Ensure start and end points are in safe waters
-  const safeStart = findNearestSeaPoint(start[0], start[1]);
-  const safeEnd = findNearestSeaPoint(end[0], end[1]);
+// Update the findSafeWaterPoint function for better accuracy
+function findSafeWaterPoint(lon: number, lat: number): [number, number] {
+  if (isInWater(lon, lat)) return [lon, lat];
   
-  // Initialize path with safe start point
-  const path: [number, number][] = [safeStart];
-  let currentPoint = safeStart;
-  let attempts = 0;
+  // Try points progressively further out into open water
+  const directions = [
+    [1, -0.5],   // East-southeast
+    [1, 0],      // East
+    [0.8, -0.6], // Southeast
+    [0.6, -0.8], // South-southeast
+    [-0.5, -1],  // South-southwest
+  ];
   
-  while (attempts < maxAttempts && !path.includes(safeEnd)) {
-    let bestNextPoint: [number, number] | null = null;
-    let minDistanceToEnd = Infinity;
-    
-    // Try points from shipping lanes first
-    const lanes = findRelevantShippingLanes(currentPoint, safeEnd);
-    for (const lane of lanes) {
-      for (const point of lane) {
-        if (!doesSegmentCrossLand(currentPoint, point)) {
-          const distToEnd = calculateDistance(point[0], point[1], safeEnd[0], safeEnd[1]);
-          if (distToEnd < minDistanceToEnd) {
-            minDistanceToEnd = distToEnd;
-            bestNextPoint = point;
-          }
-        }
-      }
-    }
-    
-    // If no shipping lane point works, try radial search with more points
-    if (!bestNextPoint) {
-      const angles = Array.from({ length: 72 }, (_, i) => i * 5);  // Every 5 degrees
-      const distances = [50, 100, 150, 200, 300, 400, 500];  // More distance options
-      
-      for (const distance of distances) {
-        for (const angle of angles) {
-          const rad = angle * Math.PI / 180;
-          const dx = Math.cos(rad) * distance / 111;
-          const dy = Math.sin(rad) * distance / 111;
-          
-          const testPoint: [number, number] = [
-            currentPoint[0] + dx,
-            currentPoint[1] + dy
-          ];
-          
-          if (!isPointNearLand(testPoint[0], testPoint[1]) &&
-              !doesSegmentCrossLand(currentPoint, testPoint)) {
-            const distToEnd = calculateDistance(testPoint[0], testPoint[1], safeEnd[0], safeEnd[1]);
-            if (distToEnd < minDistanceToEnd) {
-              minDistanceToEnd = distToEnd;
-              bestNextPoint = testPoint;
-            }
-          }
-        }
-      }
-    }
-    
-    if (bestNextPoint) {
-      path.push(bestNextPoint);
-      currentPoint = bestNextPoint;
-      
-      // Try to reach end point with intermediate validation
-      if (!doesSegmentCrossLand(currentPoint, safeEnd)) {
-        // Add intermediate points for safety
-        const midPoint = [
-          (currentPoint[0] + safeEnd[0]) / 2,
-          (currentPoint[1] + safeEnd[1]) / 2
-        ] as [number, number];
-        
-        if (!isPointNearLand(midPoint[0], midPoint[1])) {
-          path.push(midPoint);
-        }
-        path.push(safeEnd);
-        break;
-      }
-    }
-    
-    attempts++;
-  }
-  
-  // Add more intermediate points for smoother water-only path
-  return optimizeAndValidateSeaPath(path);
-};
-
-// Enhanced route optimization and validation
-const optimizeAndValidateSeaPath = (path: [number, number][]): [number, number][] => {
-  if (path.length <= 2) return path;
-  
-  // First pass: Ensure all points are in water and add intermediate points where needed
-  const validated: [number, number][] = [];
-  for (let i = 0; i < path.length - 1; i++) {
-    const current = path[i];
-    const next = path[i + 1];
-    validated.push(current);
-    
-    // Check if segment needs intermediate points
-    if (doesSegmentCrossLand(current, next)) {
-      // Add multiple intermediate points
-      const numIntermediatePoints = 5;
-      for (let j = 1; j < numIntermediatePoints; j++) {
-        const fraction = j / numIntermediatePoints;
-        const intermediateLon = current[0] + (next[0] - current[0]) * fraction;
-        const intermediateLat = current[1] + (next[1] - current[1]) * fraction;
-        const safePoint = findNearestSeaPoint(intermediateLon, intermediateLat);
-        validated.push(safePoint);
-      }
-    }
-  }
-  validated.push(path[path.length - 1]);
-  
-  // Second pass: Smooth the path while ensuring water-only route
-  const smoothed = smoothRoute(validated);
-  
-  // Final pass: Ensure all points are in water
-  return smoothed.map(point => 
-    isPointNearLand(point[0], point[1]) ? 
-      findNearestSeaPoint(point[0], point[1]) : 
-      point
-  );
-};
-
-// Enhanced route smoothing with water validation
-const smoothRoute = (waypoints: [number, number][]): [number, number][] => {
-  if (waypoints.length < 3) return waypoints;
-  
-  const smoothed: [number, number][] = [waypoints[0]];
-  const windowSize = 3;
-  
-  for (let i = 1; i < waypoints.length - 1; i++) {
-    const window = waypoints.slice(
-      Math.max(0, i - windowSize),
-      Math.min(waypoints.length, i + windowSize + 1)
-    );
-    
-    // Calculate weighted average
-    let sumLon = 0, sumLat = 0, totalWeight = 0;
-    window.forEach((point, idx) => {
-      const weight = 1 / (Math.abs(idx - windowSize) + 1);
-      sumLon += point[0] * weight;
-      sumLat += point[1] * weight;
-      totalWeight += weight;
-    });
-    
-    const smoothedPoint: [number, number] = [
-      sumLon / totalWeight,
-      sumLat / totalWeight
-    ];
-    
-    // Only use smoothed point if it's in water and doesn't create land crossings
-    if (!isPointNearLand(smoothedPoint[0], smoothedPoint[1]) &&
-        !doesSegmentCrossLand(smoothed[smoothed.length - 1], smoothedPoint)) {
-      smoothed.push(smoothedPoint);
-    } else {
-      // If smoothed point is invalid, use nearest safe point
-      const safePoint = findNearestSeaPoint(smoothedPoint[0], smoothedPoint[1]);
-      if (!doesSegmentCrossLand(smoothed[smoothed.length - 1], safePoint)) {
-        smoothed.push(safePoint);
-      } else {
-        // If safe point still creates crossing, keep original point
-        smoothed.push(waypoints[i]);
+  for (let distance = 0.5; distance <= 2; distance += 0.5) {
+    for (const [dx, dy] of directions) {
+      const testLon = lon + dx * distance;
+      const testLat = lat + dy * distance;
+      if (isInWater(testLon, testLat)) {
+        return [testLon, testLat];
       }
     }
   }
   
-  smoothed.push(waypoints[waypoints.length - 1]);
-  return smoothed;
-};
+  // If still not found, try moving further out
+  return [lon + 1.5, lat - 1];
+}
 
-// Find relevant shipping lanes for the route
-const findRelevantShippingLanes = (
-  start: [number, number],
-  end: [number, number]
-): [number, number][][] => {
-  // Calculate bearing between start and end
-  const startLat = start[1] * Math.PI / 180;
-  const startLon = start[0] * Math.PI / 180;
-  const endLat = end[1] * Math.PI / 180;
-  const endLon = end[0] * Math.PI / 180;
-  
-  const y = Math.sin(endLon - startLon) * Math.cos(endLat);
-  const x = Math.cos(startLat) * Math.sin(endLat) -
-           Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLon - startLon);
-  const bearing = Math.atan2(y, x) * 180 / Math.PI;
-  
-  // Find lanes that generally go in the same direction
-  return majorShippingLanes.filter(lane => {
-    const laneBearing = calculateLaneBearing(lane);
-    const bearingDiff = Math.abs(bearing - laneBearing);
-    return bearingDiff <= 90 || bearingDiff >= 270;
-  });
-};
-
-// Calculate the general bearing of a shipping lane
-const calculateLaneBearing = (lane: [number, number][]): number => {
-  if (lane.length < 2) return 0;
-  
-  const start = lane[0];
-  const end = lane[lane.length - 1];
-  
-  const startLat = start[1] * Math.PI / 180;
-  const startLon = start[0] * Math.PI / 180;
-  const endLat = end[1] * Math.PI / 180;
-  const endLon = end[0] * Math.PI / 180;
-  
-  const y = Math.sin(endLon - startLon) * Math.cos(endLat);
-  const x = Math.cos(startLat) * Math.sin(endLat) -
-           Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLon - startLon);
-  
-  return Math.atan2(y, x) * 180 / Math.PI;
-};
-
-// Enhanced createSeaRoute function
-const createSeaRoute = (
-  startLon: number, 
-  startLat: number, 
-  endLon: number, 
-  endLat: number,
-  options: {
-    numPoints?: number;
-    vessel?: {
-      draft: number;
-      length: number;
-      beam: number;
-      iceClass?: boolean;
-    };
-    avoidZones?: ('ECA' | 'SECA' | 'PIRACY' | 'ICE')[];
-    useCanals?: boolean;
-  } = {}
-): [number, number][] => {
-  const {
-    numPoints = 100, // Increased from 50 to 100 for more detailed paths
-    vessel,
-    avoidZones = [],
-    useCanals = true
-  } = options;
-
-  // Ensure start and end points are in the sea
-  const startPoint = findNearestSeaPoint(startLon, startLat);
-  const endPoint = findNearestSeaPoint(endLon, endLat);
-  
-  // Find safe path between points with increased attempts
-  const safePath = findSafeSeaPath(startPoint, endPoint, 30);
-  
-  // Generate detailed waypoints along the safe path with validation
-  const detailedWaypoints: [number, number][] = [];
-  
-  for (let i = 0; i < safePath.length - 1; i++) {
-    const segment = calculateDetailedSegment(
-      safePath[i][0],
-      safePath[i][1],
-      safePath[i + 1][0],
-      safePath[i + 1][1],
-      Math.max(10, Math.ceil(numPoints / safePath.length))
-    );
-    
-    // Add all points except the last one (to avoid duplicates)
-    detailedWaypoints.push(...segment.slice(0, -1));
-  }
-  
-  // Add the final point
-  detailedWaypoints.push(safePath[safePath.length - 1]);
-  
-  // Final validation and smoothing with strict water-only constraint
-  return validateAndSmoothRoute(detailedWaypoints);
-};
-
-// New function to calculate detailed segment with water-only points
-const calculateDetailedSegment = (
+// Create a simple water route between two points
+function createWaterRoute(
   startLon: number,
   startLat: number,
   endLon: number,
-  endLat: number,
-  numPoints: number
-): [number, number][] => {
-  const points: [number, number][] = [];
-  let lastValidPoint: [number, number] = [startLon, startLat];
-  points.push(lastValidPoint);
+  endLat: number
+): [number, number][] {
+  const route: [number, number][] = [];
+  
+  // First, find safe starting and ending points if needed
+  const safeStart = findSafeWaterPoint(startLon, startLat);
+  const safeEnd = findSafeWaterPoint(endLon, endLat);
+  
+  // For routes near Japan, take southern route
+  if (startLon >= 130 && startLon <= 145 && startLat >= 30 && startLat <= 45) {
+    route.push(safeStart);
+    // Go south of Japan
+    route.push([safeStart[0], 33.0] as [number, number]);
+    route.push([145.0, 33.0] as [number, number]);
+    route.push(safeEnd);
+  } else {
+    route.push(safeStart);
+    route.push(safeEnd);
+  }
 
-  for (let i = 1; i <= numPoints; i++) {
-    const fraction = i / numPoints;
-    const lon = startLon + (endLon - startLon) * fraction;
-    const lat = startLat + (endLat - startLat) * fraction;
+  // Verify the entire path
+  const finalRoute: [number, number][] = [];
+  for (let i = 0; i < route.length - 1; i++) {
+    const start = route[i];
+    const end = route[i + 1];
     
-    if (!isPointNearLand(lon, lat)) {
-      lastValidPoint = [lon, lat];
-      points.push(lastValidPoint);
-    } else {
-      // If point is on land, find nearest sea point
-      const seaPoint = findNearestSeaPoint(lon, lat);
-      if (!doesSegmentCrossLand(lastValidPoint, seaPoint)) {
-        lastValidPoint = seaPoint;
-        points.push(lastValidPoint);
+    finalRoute.push(start);
+    
+    // Add intermediate points to ensure path stays in water
+    const steps = 8;
+    for (let j = 1; j < steps; j++) {
+      const t = j / steps;
+      const point: [number, number] = [
+        start[0] + (end[0] - start[0]) * t,
+        start[1] + (end[1] - start[1]) * t
+      ];
+      
+      // If point is not in water, move it south
+      if (!isInWater(point[0], point[1])) {
+        const safePoint: [number, number] = [point[0], point[1] - 1.5];
+        if (isInWater(safePoint[0], safePoint[1])) {
+          finalRoute.push(safePoint);
+        }
+      } else {
+        finalRoute.push(point);
       }
     }
   }
-
-  return points;
-};
-
-// Enhanced validation and smoothing with strict water-only constraint
-const validateAndSmoothRoute = (waypoints: [number, number][]): [number, number][] => {
-  // First pass: Ensure all points are in water
-  const waterOnlyPoints = waypoints.map(point =>
-    isPointNearLand(point[0], point[1]) ?
-      findNearestSeaPoint(point[0], point[1]) :
-      point
-  );
   
-  // Second pass: Add intermediate points where needed
-  const withIntermediates: [number, number][] = [];
-  for (let i = 0; i < waterOnlyPoints.length - 1; i++) {
-    const current = waterOnlyPoints[i];
-    const next = waterOnlyPoints[i + 1];
-    withIntermediates.push(current);
-    
-    if (doesSegmentCrossLand(current, next)) {
-      // Add multiple intermediate points
-      const numIntermediatePoints = 5;
-      for (let j = 1; j < numIntermediatePoints; j++) {
-        const fraction = j / numIntermediatePoints;
-        const intermediateLon = current[0] + (next[0] - current[0]) * fraction;
-        const intermediateLat = current[1] + (next[1] - current[1]) * fraction;
-        const safePoint = findNearestSeaPoint(intermediateLon, intermediateLat);
-        withIntermediates.push(safePoint);
-      }
+  finalRoute.push(route[route.length - 1]);
+  return finalRoute;
+}
+
+// Simplified path safety check
+function checkPathSafety(
+  startLon: number,
+  startLat: number,
+  endLon: number,
+  endLat: number
+): boolean {
+  const steps = 10;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const lon = startLon + (endLon - startLon) * t;
+    const lat = startLat + (endLat - startLat) * t;
+    if (!isInWater(lon, lat)) {
+      return false;
     }
   }
-  withIntermediates.push(waterOnlyPoints[waterOnlyPoints.length - 1]);
-  
-  // Final pass: Smooth while maintaining water-only constraint
-  return optimizeAndValidateSeaPath(withIntermediates);
-};
+  return true;
+}
 
-// Calculate optimal route between two ports
+// Calculate optimal route between two ports (simplified)
 export const calculateOptimalRoute = async (
   startCoords: [number, number],
   endCoords: [number, number],
-  options: {
-    shipSpeed: number;
-    departureDate: Date;
-    considerWeather: boolean;
-    fuelEfficient: boolean;
-    shipType: string;
-    vessel?: {
-      draft: number;
-      length: number;
-      beam: number;
-      iceClass?: boolean;
-    };
-    avoidZones?: ('ECA' | 'SECA' | 'PIRACY' | 'ICE')[];
-    useCanals?: boolean;
-  }
+  options: RouteOptions
 ): Promise<RouteResult> => {
-  // Use improved sea routing
-  const waypoints = createSeaRoute(
+  // Generate water-only route
+  const waypoints = createWaterRoute(
     startCoords[0],
     startCoords[1],
     endCoords[0],
-    endCoords[1],
-    {
-      numPoints: 12,
-      vessel: options.vessel,
-      avoidZones: options.avoidZones,
-      useCanals: options.useCanals
-    }
+    endCoords[1]
   );
   
   // Calculate total distance
@@ -717,122 +568,237 @@ export const calculateOptimalRoute = async (
     );
   }
   
-  // Calculate duration based on ship speed (knots to km/h conversion)
+  // Calculate duration based on ship speed
   const speedKmh = options.shipSpeed * 1.852;
   const durationHours = totalDistance / speedKmh;
+
+  // Update the weather forecast fetching
+  const checkpointPromises = waypoints.map(async (point, index) => {
+    const timeAtPoint = new Date(
+      options.departureDate.getTime() + (durationHours * index / (waypoints.length - 1)) * 60 * 60 * 1000
+    );
+
+    try {
+      // Get live weather forecast for this point
+      const weatherResponse = await getRouteWeatherForecast(
+        [[point[0], point[1]]], // coordinates array
+        timeAtPoint // timestamp as Date object
+      );
+      const weatherData = weatherResponse as WeatherData;
+
+      // Format the weather data with proper units
+      const formattedWeather: WeatherForecast = {
+        description: weatherData.description || 'No data available',
+        temperature: Math.round((weatherData.temperature || 20) * 10) / 10, // One decimal place
+        windSpeed: Math.round(weatherData.windSpeed || 0),
+        windDirection: Math.round(weatherData.windDirection || 0),
+        waveHeight: Math.round((weatherData.waveHeight || 0) * 10) / 10,
+        precipitation: Math.round((weatherData.precipitation || 0) * 100) / 100,
+        visibility: Math.round(weatherData.visibility || 10),
+        pressure: Math.round(weatherData.pressure || 1013),
+        humidity: Math.round(weatherData.humidity || 70),
+        seaTemp: Math.round((weatherData.seaTemp || 20) * 10) / 10,
+        currentSpeed: Math.round((weatherData.currentSpeed || 0) * 10) / 10,
+        currentDirection: Math.round(weatherData.currentDirection || 0)
+      };
+
+      // Calculate navigation info
+      const distanceFromStart = calculateDistance(
+        startCoords[0], startCoords[1],
+        point[0], point[1]
+      );
+
+      const distanceToNext = index < waypoints.length - 1
+        ? calculateDistance(
+            point[0], point[1],
+            waypoints[index + 1][0], waypoints[index + 1][1]
+          )
+        : 0;
+
+      const bearing = index < waypoints.length - 1
+        ? calculateBearing(
+            point[0], point[1],
+            waypoints[index + 1][0], waypoints[index + 1][1]
+          )
+        : 0;
+
+      const timeToNext = index < waypoints.length - 1
+        ? formatDuration(distanceToNext / options.shipSpeed)
+        : '0h';
+
+      // Get nearest port and assess weather risks
+      const nearestPortInfo = findNearestPort(point[0], point[1]);
+      const weatherRisk = assessWeatherRisk(formattedWeather);
+
+      // Create checkpoint with live weather info
+      const checkpoint: CheckpointInfo = {
+        position: point,
+        estimatedTime: timeAtPoint.toLocaleString(),
+        distance: Math.round(totalDistance * index / (waypoints.length - 1)),
+        weatherForecast: {
+          ...formattedWeather,
+          description: `${formattedWeather.description} (Live)`,
+          temperature: formattedWeather.temperature,
+          windSpeed: formattedWeather.windSpeed,
+          windDirection: formattedWeather.windDirection,
+          waveHeight: formattedWeather.waveHeight,
+          precipitation: formattedWeather.precipitation,
+          visibility: formattedWeather.visibility,
+          pressure: formattedWeather.pressure,
+          humidity: formattedWeather.humidity,
+          seaTemp: formattedWeather.seaTemp,
+          currentSpeed: formattedWeather.currentSpeed,
+          currentDirection: formattedWeather.currentDirection
+        },
+        navigationInfo: {
+          distanceFromStart: Math.round(distanceFromStart),
+          distanceToNext: Math.round(distanceToNext),
+          bearing: Math.round(bearing),
+          estimatedSpeed: options.shipSpeed,
+          fuelConsumption: Math.round(distanceToNext * 0.3),
+          timeToNext
+        },
+        safetyInfo: {
+          nearestPort: nearestPortInfo.name,
+          nearestPortDistance: Math.round(nearestPortInfo.distance),
+          riskLevel: weatherRisk.level,
+          warnings: weatherRisk.description.split(', ').filter(w => w),
+          recommendations: weatherRisk.recommendations
+        }
+      };
+
+      return checkpoint;
+    } catch (error) {
+      console.error('Weather fetch error:', error);
+      // Return default data with error indication
+      return {
+        position: point,
+        estimatedTime: timeAtPoint.toLocaleString(),
+        distance: Math.round(totalDistance * index / (waypoints.length - 1)),
+        weatherForecast: {
+          description: 'Live weather data unavailable',
+          temperature: null,
+          windSpeed: null,
+          windDirection: null,
+          waveHeight: null,
+          precipitation: null,
+          visibility: null,
+          pressure: null,
+          humidity: null,
+          seaTemp: null,
+          currentSpeed: null,
+          currentDirection: null
+        },
+        navigationInfo: {
+          distanceFromStart: Math.round(calculateDistance(
+            startCoords[0], startCoords[1],
+            point[0], point[1]
+          )),
+          distanceToNext: 0,
+          bearing: 0,
+          estimatedSpeed: options.shipSpeed,
+          fuelConsumption: 0,
+          timeToNext: '0h'
+        },
+        safetyInfo: {
+          nearestPort: 'Unknown',
+          nearestPortDistance: 0,
+          riskLevel: 'low',
+          warnings: ['Weather data unavailable'],
+          recommendations: ['Check weather service status']
+        }
+      } as CheckpointInfo;
+    }
+  });
+
+  // Wait for all weather forecasts
+  const checkpoints = await Promise.all(checkpointPromises);
   
   // Format duration
   const days = Math.floor(durationHours / 24);
   const hours = Math.floor(durationHours % 24);
   const duration = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
   
-  // Calculate fuel consumption (simplified)
-  const baseFuelRate = {
-    'container': 0.3,
-    'bulk': 0.25,
-    'tanker': 0.35,
-    'cruise': 0.4,
-    'ferry': 0.2,
-  }[options.shipType.toLowerCase()] || 0.3;
-  
-  // Apply fuel efficiency modifier if selected
-  const fuelRate = options.fuelEfficient ? baseFuelRate * 0.85 : baseFuelRate;
-  const fuelConsumption = Math.round(totalDistance * fuelRate);
-  
-  // Get weather data and risk assessment if requested
-  let weatherRisk = {
-    level: 'low' as 'low' | 'medium' | 'high',
-    description: 'Weather data not considered',
-    recommendations: []
-  };
-  
-  if (options.considerWeather) {
-    const forecasts = await getRouteWeatherForecast(waypoints, options.departureDate);
-    const assessment = getRouteRiskAssessment(forecasts);
-    weatherRisk = {
-      level: assessment.riskLevel,
-      description: assessment.description,
-      recommendations: assessment.recommendations
+  // Calculate overall weather risk
+  const weatherRisks = checkpoints.map(cp => {
+    const risk = assessWeatherRisk(cp.weatherForecast);
+    return {
+      level: risk.level,
+      description: risk.description,
+      recommendations: risk.recommendations
     };
-  }
-
-  // Calculate journey details including checkpoints and timing
-  const departureTime = new Date(options.departureDate);
-  const checkpoints = [];
-  let currentDistance = 0;
-  const hoursPerCheckpoint = durationHours / (waypoints.length - 1);
-  
-  // Get weather forecasts for checkpoints if weather is considered
-  const checkpointForecasts = options.considerWeather
-    ? await getRouteWeatherForecast(waypoints, departureTime)
-    : null;
-  
-  for (let i = 0; i < waypoints.length; i++) {
-    if (i > 0) {
-      const segmentDistance = calculateDistance(
-        waypoints[i-1][0], waypoints[i-1][1],
-        waypoints[i][0], waypoints[i][1]
-      );
-      currentDistance += segmentDistance;
-    }
-    
-    // Calculate estimated time at this checkpoint
-    const hoursFromStart = i * hoursPerCheckpoint;
-    const checkpointTime = new Date(departureTime.getTime() + hoursFromStart * 60 * 60 * 1000);
-    
-    // Format time
-    const timeStr = checkpointTime.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    
-    const checkpoint = {
-      position: waypoints[i] as [number, number],
-      estimatedTime: timeStr,
-      distance: Math.round(currentDistance),
-      ...(checkpointForecasts && {
-        weatherForecast: {
-          description: checkpointForecasts[i]?.description || 'Unknown',
-          temperature: checkpointForecasts[i]?.temperature || 0,
-          windSpeed: checkpointForecasts[i]?.windSpeed || 0
-        }
-      })
-    };
-    
-    checkpoints.push(checkpoint);
-  }
-  
-  // Calculate arrival time
-  const arrivalTime = new Date(departureTime.getTime() + durationHours * 60 * 60 * 1000);
-  const formattedArrivalTime = arrivalTime.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
   });
-  
-  // Calculate fuel cost estimate (simplified)
-  const fuelPricePerTon = 500; // USD per ton, average price
-  const fuelCostEstimate = Math.round(fuelConsumption * fuelPricePerTon);
+
+  // Get highest risk level
+  const riskLevels = { low: 0, medium: 1, high: 2 };
+  const maxRisk = weatherRisks.reduce((max, risk) => {
+    return riskLevels[risk.level] > riskLevels[max.level] ? risk : max;
+  }, { level: 'low', description: '', recommendations: [] });
+
+  // Simplified fuel consumption calculation with weather consideration
+  const weatherImpact = maxRisk.level === 'high' ? 1.3 : maxRisk.level === 'medium' ? 1.15 : 1;
+  const fuelConsumption = Math.round(totalDistance * 0.3 * weatherImpact);
   
   return {
     waypoints,
     distance: Math.round(totalDistance),
     duration,
     fuelConsumption,
-    weatherRisk,
+    weatherRisk: maxRisk,
     journeyDetails: {
-      estimatedArrival: formattedArrivalTime,
-      fuelCostEstimate,
+      estimatedArrival: checkpoints[checkpoints.length - 1].estimatedTime,
+      fuelCostEstimate: Math.round(fuelConsumption * 500),
       checkpoints,
       totalDurationHours: durationHours
     }
   };
 };
+
+// Helper function to assess weather risk
+function assessWeatherRisk(weather: WeatherForecast): WeatherRisk {
+  const risks: string[] = [];
+  let riskLevel: 'low' | 'medium' | 'high' = 'low';
+  const recommendations: string[] = [];
+
+  // Check wind speed
+  if (weather.windSpeed > 30) {
+    risks.push('High winds');
+    riskLevel = 'high';
+    recommendations.push('Consider alternative route or delay departure');
+  } else if (weather.windSpeed > 20) {
+    risks.push('Moderate winds');
+    riskLevel = riskLevel === 'low' ? 'medium' : riskLevel;
+    recommendations.push('Monitor wind conditions');
+  }
+
+  // Check wave height
+  if (weather.waveHeight > 4) {
+    risks.push('High waves');
+    riskLevel = 'high';
+    recommendations.push('Avoid area if possible');
+  } else if (weather.waveHeight > 2) {
+    risks.push('Moderate waves');
+    riskLevel = riskLevel === 'low' ? 'medium' : riskLevel;
+    recommendations.push('Prepare for rough seas');
+  }
+
+  // Check visibility
+  if (weather.visibility < 1) {
+    risks.push('Poor visibility');
+    riskLevel = 'high';
+    recommendations.push('Use radar and reduce speed');
+  } else if (weather.visibility < 3) {
+    risks.push('Reduced visibility');
+    riskLevel = riskLevel === 'low' ? 'medium' : riskLevel;
+    recommendations.push('Maintain proper lookout');
+  }
+
+  return {
+    level: riskLevel,
+    description: risks.join(', ') || 'Good conditions',
+    recommendations
+  };
+}
 
 // Calculate multiple route alternatives
 export const calculateRouteAlternatives = async (
@@ -853,33 +819,100 @@ export const calculateRouteAlternatives = async (
   }
 ): Promise<RouteResult[]> => {
   // Generate 3 route alternatives: standard, weather-optimized, and fuel-efficient
+  const baseOptions: RouteOptions = {
+    startPortId: `PORT_${startCoords[0]}_${startCoords[1]}`,
+    endPortId: `PORT_${endCoords[0]}_${endCoords[1]}`,
+    shipType: options.shipType,
+    shipSpeed: options.shipSpeed,
+    departureDate: options.departureDate,
+    considerWeather: false,
+    fuelEfficient: false
+  };
+
   const standardOptions = {
-    ...options,
+    ...baseOptions,
     considerWeather: false,
     fuelEfficient: false
   };
   
   const weatherOptions = {
-    ...options,
+    ...baseOptions,
     considerWeather: true,
     fuelEfficient: false
   };
   
   const fuelOptions = {
-    ...options,
+    ...baseOptions,
     considerWeather: false,
     fuelEfficient: true
   };
   
-  const [standardRoute, weatherRoute, fuelRoute] = await Promise.all([
-    calculateOptimalRoute(startCoords, endCoords, standardOptions),
-    calculateOptimalRoute(startCoords, endCoords, weatherOptions),
-    calculateOptimalRoute(startCoords, endCoords, fuelOptions)
-  ]);
-  
-  return [
-    { ...standardRoute, routeType: 'Standard' },
-    { ...weatherRoute, routeType: 'Weather Optimized' },
-    { ...fuelRoute, routeType: 'Fuel Efficient' }
-  ];
+  try {
+    const [standardRoute, weatherRoute, fuelRoute] = await Promise.all([
+      calculateOptimalRoute(startCoords, endCoords, standardOptions),
+      calculateOptimalRoute(startCoords, endCoords, weatherOptions),
+      calculateOptimalRoute(startCoords, endCoords, fuelOptions)
+    ]);
+    
+    return [
+      { ...standardRoute, routeType: 'Standard' },
+      { ...weatherRoute, routeType: 'Weather Optimized' },
+      { ...fuelRoute, routeType: 'Fuel Efficient' }
+    ];
+  } catch (error) {
+    console.error('Error calculating routes:', error);
+    // Return at least one basic route on error
+    const basicRoute = await calculateOptimalRoute(startCoords, endCoords, standardOptions);
+    return [{ ...basicRoute, routeType: 'Standard' }];
+  }
 };
+
+// Add helper functions at the top of the file
+function calculateBearing(lon1: number, lat1: number, lon2: number, lat2: number): number {
+  const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) -
+           Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function formatDuration(hours: number): string {
+  const days = Math.floor(hours / 24);
+  const remainingHours = Math.floor(hours % 24);
+  return days > 0 ? `${days}d ${remainingHours}h` : `${remainingHours}h`;
+}
+
+interface NearestPort {
+  name: string;
+  distance: number;
+  coordinates: [number, number];
+}
+
+function findNearestPort(lon: number, lat: number): NearestPort {
+  const ports: Array<[string, number, number]> = [
+    ['Dubai Port', 54.32, 24.47],
+    ['Abu Dhabi Port', 51.58, 24.47],
+    ['Fujairah Port', 55.35, 25.05],
+    ['Sharjah Port', 54.72, 24.58],
+    ['Ajman Port', 55.05, 24.75],
+    ['Ras Al Khaimah Port', 55.55, 25.15]
+  ];
+
+  let nearest = {
+    name: ports[0][0],
+    distance: calculateDistance(lon, lat, ports[0][1], ports[0][2]),
+    coordinates: [ports[0][1], ports[0][2]] as [number, number]
+  };
+
+  for (const [name, portLon, portLat] of ports) {
+    const distance = calculateDistance(lon, lat, portLon, portLat);
+    if (distance < nearest.distance) {
+      nearest = {
+        name,
+        distance,
+        coordinates: [portLon, portLat]
+      };
+    }
+  }
+
+  return nearest;
+}
